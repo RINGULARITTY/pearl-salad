@@ -49,7 +49,7 @@ WORKER = env("WORKER") or ("v" + env("CONTAINER_ID") if env("CONTAINER_ID") else
 # Identite de l'instance, reprise par la passerelle locale (pearl_bridge.py) pour rattacher
 # chaque mesure a l'instance Vast correspondante.
 INSTANCE_ID = env("CONTAINER_ID", "")
-CTL_VERSION = "1.2.0"
+CTL_VERSION = "1.2.1"
 
 DEFAULT_POOLS = "pool.pearlhash.xyz:9000,hk.pearlhash.net:9000,global.pearlhash.net:9000,global2.pearlhash.net:9000"
 POOLS = [p.strip() for p in env("POOLS", DEFAULT_POOLS).split(",") if p.strip()]
@@ -177,6 +177,9 @@ MINERS = {
         "cmd": lambda b, p, u: [b, "--algorithm", "pearlhash", "--pool", p["hostport"]]
                                + (["--tls", "true"] if p["tls"] else [])
                                + ["--wallet", u["wallet"], "--worker", u["worker"], "--password", "x", "--disable-cpu"],
+        # Le tableau affiche aussi des moyennes "1 min / 15 min / 1 hr / 6 hr" qui trainent au
+        # demarrage : seule la ligne "Hashrate" (total instantane) fait foi.
+        "hr_line": re.compile(r"(?:^|\]\s*)Hashrate\s+\d", re.I),
     },
     "bzminer": {
         "repo": "bzminer/bzminer",
@@ -1127,18 +1130,25 @@ class Controller:
             if not gpus():
                 return 1
         self.apply_oc()
-        self.pools = rank_pools()
+        # serveurs du premier candidat : un seul classement quand tous partagent les memes
+        self.pool_key, self.pools = None, []
+        self.use_pools_for(next(iter(self.cfgs.values())).name if self.cfgs else None)
         force = env("FORCE_RESCREEN") == "1"
-        verdict, info = (None, None) if force else self.preflight()
-        if info:
-            self.state["scores"] = info["scores"]
-            fp, gs = fingerprint(list(self.cfgs))
-            self.state.update({"fp": fp, "screened_at": time.time(), "gpus": [x.get("name") for x in gs]})
-            save_json(STATE_F, self.state)
-            log("pas de benchmark long : la mesure du preflight fait foi (%s, %.1f TH/s net)"
-                % (info["best"], info["scores"][info["best"]]["net"]))
+        if len(self.cfgs) == 1 and not force:
+            # Rien a comparer : le preflight couterait un arret et une relance du mineur (~10 s
+            # sans hashrate), ce qui pese sur des noeuds interrompus toutes les 10 minutes (Salad Batch).
+            log("un seul mineur candidat (%s) : demarrage direct, sans preflight ni benchmark" % next(iter(self.cfgs)))
         else:
-            self.ensure_screened(force=force)
+            verdict, info = (None, None) if force else self.preflight()
+            if info:
+                self.state["scores"] = info["scores"]
+                fp, gs = fingerprint(list(self.cfgs))
+                self.state.update({"fp": fp, "screened_at": time.time(), "gpus": [x.get("name") for x in gs]})
+                save_json(STATE_F, self.state)
+                log("pas de benchmark long : la mesure du preflight fait foi (%s, %.1f TH/s net)"
+                    % (info["best"], info["scores"][info["best"]]["net"]))
+            else:
+                self.ensure_screened(force=force)
         self.start(self.best())
         log("choix : %s (scores %s)" % (self.cur, {k: v.get("net") for k, v in self.state.get("scores", {}).items()}))
         last_status = 0
