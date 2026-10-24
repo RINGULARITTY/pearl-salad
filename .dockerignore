@@ -1,0 +1,6 @@
+test/
+.github/
+*.md
+build.sh
+build.ps1
+**/__pycache__
