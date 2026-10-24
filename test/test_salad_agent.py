@@ -113,7 +113,14 @@ ps.save_json(ps.STATUS_F, {"config": "pearlminer", "uptime_min": 30, "th_5min": 
                            "shares": {"last_accept_s": None}})
 ps.INTERVAL = 0
 for i in range(ps.GRACE):
-    ps.cmd_watch(once=True)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        ps.cmd_watch(once=True)
+line = buf.getvalue().strip().splitlines()[-1]
+logrep = json.loads(line)
+check("watch : rapport JSON sur la sortie standard (logs Salad)", logrep["pearl"] == "report"
+      and logrep["status"]["th_5min"] == 150 and logrep["node"]["health"]["verdict"] == "lent", line[:120])
+check("rapport des logs compact (< 6 Ko, sans historique)", len(line) < 6000 and "health_history" not in line, len(line))
 node = ps.load_json(ps.SALAD_F)
 # chaque appel --once repart de zero : les verifications d'affilee se comptent dans une meme boucle
 check("watch --once : verdict lent enregistre", node["health"]["verdict"] == "lent", node.get("health"))

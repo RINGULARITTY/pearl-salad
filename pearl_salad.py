@@ -15,7 +15,9 @@ de pearl_controller.py dans le conteneur :
           suppression (deletion cost) suit le hashrate : si tu reduis le nombre de
           replicas, Salad retire d'abord les noeuds les plus lents.
   report  une ligne JSON (statut du controleur + sante + identite Salad + fin du journal),
-          lue en SSH par le tableau de bord (pearl_dashboard.py).
+          lue en SSH par le tableau de bord (pearl_dashboard.py). La surveillance ecrit aussi
+          ce rapport chaque minute sur la sortie standard : Salad le stocke dans ses logs et le
+          tableau de bord le relit par l'API, meme sur un noeud sans acces SSH.
   probe   code 0 si le noeud mine ou se prepare, 1 sinon (sonde liveness optionnelle).
 
 Variables (toutes optionnelles) :
@@ -33,7 +35,7 @@ Variables (toutes optionnelles) :
 """
 import json, os, re, socket, statistics, subprocess, sys, time, urllib.error, urllib.request
 
-AGENT_VERSION = "1.0.0"
+AGENT_VERSION = "1.1.0"
 
 
 def env(k, d=None):
@@ -463,9 +465,32 @@ def cmd_watch(once=False):
         if verdict in BAD and strikes >= GRACE and not state.get("realloc"):
             reallocate("%s : %s (%d verifications d'affilee, %s)" % (verdict, detail, strikes, src), state)
         save_json(SALAD_F, state)
+        if env("LOG_REPORT", "1") == "1":
+            emit_report(state, st, round(now - mtime) if st else None)
         if once:
             return 0
         time.sleep(INTERVAL)
+
+
+STATUS_KEYS = ("time", "config", "controller_version", "worker", "version", "pool", "pool_rtt_ms", "uptime_min",
+               "th_5min", "th_net", "th_effective", "reject_ratio_1h", "prl_h_est", "shares", "throttle_pct", "gpus")
+
+
+def emit_report(state, st, status_age):
+    """Le rapport sur une ligne JSON de la sortie standard. Salad range une ligne JSON dans
+    json_log, que le tableau de bord lit par l'API de logs : aucun SSH necessaire (certains
+    noeuds n'ont pas d'acces terminal)."""
+    node = {k: state.get(k) for k in ("agent_version", "gpu", "ref", "health", "realloc", "deletion_cost")}
+    boot = state.get("boot") or {}
+    node["boot"] = {"verdict": boot.get("verdict"), "checks": boot.get("checks")}
+    rep = {"pearl": "report", "schema": 1, "agent_version": AGENT_VERSION, "at": round(time.time()),
+           "salad": salad_ids(), "status": {k: st.get(k) for k in STATUS_KEYS} if st else None,
+           "node": node, "status_age_s": status_age}
+    try:
+        sys.stdout.write(json.dumps(rep, ensure_ascii=False, separators=(",", ":"), default=str) + "\n")
+        sys.stdout.flush()
+    except (OSError, ValueError):
+        pass
 
 
 # ------------------------------------------------------------ report -----

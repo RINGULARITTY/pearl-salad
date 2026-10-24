@@ -108,9 +108,17 @@ un GPU partagé). Une fois quelques nœuds en marche, l’onglet *Salad nodes* d
 
 ## Suivi dans le tableau de bord
 
-1. Ajouter ta clé SSH publique dans le portail Salad (*SSH Keys*, Ed25519 ou RSA). Le tableau de bord lit chaque
-   instance par le SSH natif de Salad — aucun port à ouvrir, aucune donnée envoyée ailleurs.
-2. Créer une clé API (portail → *API Access*) et la mettre dans `SALAD_API_KEY` (ou `~/.salad_api_key`).
+1. Créer une clé API (portail → *API Access*) et la mettre dans `SALAD_API_KEY` (ou `~/.salad_api_key`).
+2. Optionnel : ajouter ta clé SSH publique dans le portail Salad (*SSH Keys*, Ed25519 ou RSA).
+
+D’où viennent les mesures, dans l’ordre :
+- **logs Salad** (depuis v1.0.1) : chaque minute, l’agent écrit son rapport sur une ligne JSON de la sortie
+  standard ; Salad la range dans `json_log` et le tableau de bord la relit par l’API `log-entries`. Fonctionne sur
+  tous les nœuds, sans SSH ni port ouvert ;
+- **SSH** natif de Salad, si aucun rapport récent n’est dans les logs. Certains nœuds n’ont pas d’accès terminal :
+  la passerelle accepte la connexion TCP puis la ferme au bout de ~16 s sans bannière SSH (constaté le 24/10/2026) ;
+- **pool** pearlhash.xyz en dernier recours : carte et hashrate du worker `salad-<machine>`, sans la santé du GPU
+  (étiquette « pool only »).
 3. Lancer le tableau de bord (dossier `pearl_cloud_miner`) :
 
 ```powershell
